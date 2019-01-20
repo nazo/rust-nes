@@ -26,6 +26,8 @@ fn main() {
     let mut ppu = ppu::new_ppu(&nes_rom.character_rom.data);
     let mut mem = cpu_memory::new_memory(&nes_rom.program_rom.data, &mut ppu);
 
+    cpu::reset(&mut cpu, &mut mem);
+
     let mut canvas = window.into_canvas().build().unwrap();
     let texture_creator = canvas.texture_creator();
 
@@ -45,7 +47,7 @@ fn main() {
             }
         }
 
-        // println!("---");
+        println!("---");
         cpu::run(&mut cpu, &mut mem);
 
         ppu::draw_to_canvas(&mut v_canvas, &mem.ppu);

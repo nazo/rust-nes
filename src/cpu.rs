@@ -42,17 +42,18 @@ const REG_P_FLAG_I: u8 = 0x04;
 const REG_P_FLAG_Z: u8 = 0x02;
 const REG_P_FLAG_C: u8 = 0x01;
 
-fn reset(cpu: &mut Cpu) {
-    cpu.reg_pc = 0x8000;
+pub fn reset(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) {
+    cpu.reg_pc = cpu_memory::read_mem_word(mem, 0xFFFC);
+    cpu.reg_p = cpu.reg_p | REG_P_FLAG_I;
 }
 
-fn fetch_pc_byte(cpu: &mut Cpu, mem: &cpu_memory::CpuMemory) -> u8 {
+fn fetch_pc_byte(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) -> u8 {
     let data = cpu_memory::read_mem(mem, cpu.reg_pc);
     cpu.reg_pc += 1;
     return data;
 }
 
-fn fetch_pc_word(cpu: &mut Cpu, mem: &cpu_memory::CpuMemory) -> u16 {
+fn fetch_pc_word(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) -> u16 {
     let data = cpu_memory::read_mem_word(mem, cpu.reg_pc);
     cpu.reg_pc += 2;
     return data;
@@ -68,83 +69,88 @@ fn write_word(data: &mut Vec<u8>, p: u16, v: u16) {
 }
 
 fn stack_push_byte(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, data: u8) {
-    let reg_s = 0x0100 | (cpu.reg_s as u16);
+    cpu_memory::write_mem(mem, 0x0100 | (cpu.reg_s as u16), data);
     cpu.reg_s = cpu.reg_s.wrapping_add(1);
-    mem.wram[reg_s as usize] = data;
 }
 
-fn stack_pop_byte(cpu: &mut Cpu, mem: &cpu_memory::CpuMemory) -> u8 {
-    let reg_s = 0x0100 | (cpu.reg_s as u16);
+fn stack_pop_byte(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) -> u8 {
     cpu.reg_s = cpu.reg_s.wrapping_sub(1);
-    return mem.wram[reg_s as usize];
+    return cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16));
 }
 
 fn stack_push_word(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, data: u16) {
-    let reg_s = 0x0100 | (cpu.reg_s as u16);
-    cpu.reg_s = cpu.reg_s.wrapping_add(2);
-    write_word(&mut mem.wram, reg_s, data);
+    cpu_memory::write_mem(mem, 0x0100 | (cpu.reg_s as u16), (data & 0xFF) as u8);
+    cpu.reg_s = cpu.reg_s.wrapping_add(1);
+    cpu_memory::write_mem(mem, 0x0100 | (cpu.reg_s as u16), ((data & 0xFF00) >> 8) as u8);
+    cpu.reg_s = cpu.reg_s.wrapping_add(1);
 }
 
-fn stack_pop_word(cpu: &mut Cpu, mem: &cpu_memory::CpuMemory) -> u16 {
-    let reg_s = 0x0100 | (cpu.reg_s as u16);
-    cpu.reg_s = cpu.reg_s.wrapping_sub(2);
-    return read_word(&mem.wram, reg_s);
+fn stack_pop_word(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) -> u16 {
+    let mut data: u16;
+    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
+    data = (cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16)) as u16) << 8;
+    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
+    data = data | (cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16)) as u16);
+    return data;
 }
 
 pub fn run(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) {
-    println!("pc: {}", cpu.reg_pc);
-    let code = fetch_pc_byte(cpu, &mem);
+    println!("pc: {:04X}", cpu.reg_pc);
+    let code = fetch_pc_byte(cpu, mem);
     let op = &opcode::OPCODE_TABLE[code as usize];
     opcode::debug_opcode(code);
     exec_instructions(cpu, mem, op);
 }
 
-fn read_by_addressing(cpu: &mut Cpu, mem: &cpu_memory::CpuMemory, op: &opcode::Opcode) -> u16 {
+fn read_by_addressing(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode::Opcode) -> u16 {
     match op.addressing {
         opcode::ADDRESSING_IMPLIED => {
         }
         opcode::ADDRESSING_IMMEDIATE => {
-            return fetch_pc_byte(cpu, &mem) as u16;
+            return fetch_pc_byte(cpu, mem) as u16;
         }
         opcode::ADDRESSING_ZEROPAGE => {
-            return fetch_pc_byte(cpu, &mem) as u16;
+            return fetch_pc_byte(cpu, mem) as u16;
         }
         opcode::ADDRESSING_ZEROPAGE_X => {
-            let data = fetch_pc_byte(cpu, &mem) as u16;
+            let data = fetch_pc_byte(cpu, mem) as u16;
             return data + (cpu.reg_x as u16);
         }
         opcode::ADDRESSING_ZEROPAGE_Y => {
-            let data = fetch_pc_byte(cpu, &mem) as u16;
+            let data = fetch_pc_byte(cpu, mem) as u16;
             return data + (cpu.reg_y as u16);
         }
         opcode::ADDRESSING_ABSOLUTE => {
-            return fetch_pc_word(cpu, &mem);
+            return fetch_pc_word(cpu, mem);
         }
         opcode::ADDRESSING_ABSOLUTE_X => {
-            let data = fetch_pc_word(cpu, &mem);
+            let data = fetch_pc_word(cpu, mem);
             return data + (cpu.reg_x as u16);
         }
         opcode::ADDRESSING_ABSOLUTE_Y => {
-            let data = fetch_pc_word(cpu, &mem);
+            let data = fetch_pc_word(cpu, mem);
             return data + (cpu.reg_y as u16);
         }
         opcode::ADDRESSING_INDIRECT_X => {
-            let data = cpu_memory::read_mem(mem, (fetch_pc_byte(cpu, &mem) as u16) + (cpu.reg_x as u16)) as u16;
-            return data; // todo
+            let fetch = fetch_pc_byte(cpu, mem) as u16;
+            let data = cpu_memory::read_mem(mem, fetch + (cpu.reg_x as u16)) as u16;
+            return data;
         }
         opcode::ADDRESSING_INDIRECT_Y => {
-            let data = cpu_memory::read_mem(mem, (fetch_pc_byte(cpu, &mem) as u16) + (cpu.reg_y as u16)) as u16;
-            return data; // todo
+            let fetch = fetch_pc_byte(cpu, mem) as u16;
+            let data = cpu_memory::read_mem(mem, fetch + (cpu.reg_y as u16)) as u16;
+            return data;
         }
         opcode::ADDRESSING_INDIRECT => {
-            let data = cpu_memory::read_mem_word(mem, fetch_pc_word(cpu, &mem));
-            return data; // todo
+            let fetch = fetch_pc_word(cpu, mem);
+            let data = cpu_memory::read_mem_word(mem, fetch);
+            return data;
         }
         opcode::ADDRESSING_ACCUMULATOR => {
             return cpu.reg_a as u16;
         }
         opcode::ADDRESSING_RELATIVE => {
-            return fetch_pc_byte(cpu, &mem) as u16;
+            return fetch_pc_byte(cpu, mem) as u16;
         }
         _ => {
         }
@@ -155,7 +161,7 @@ fn read_by_addressing(cpu: &mut Cpu, mem: &cpu_memory::CpuMemory, op: &opcode::O
 fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode::Opcode) {
     let mut data = read_by_addressing(cpu, mem, op);
     let relative = (data as u8) as i8;
-    // println!("data: {:04X}", data);
+    println!("data: {:04X}", data);
     match op.code {
         opcode::OPCODE_LDA => {
             if op.addressing != opcode::ADDRESSING_IMMEDIATE {
@@ -189,7 +195,7 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
         }
         opcode::OPCODE_TAX => {
             cpu.reg_x = cpu.reg_a;
-            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_x & REG_P_FLAG_N) | (if cpu.reg_x == 0 { 2 } else { 0 });
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_x & REG_P_FLAG_N) | (if cpu.reg_x == 0 { REG_P_FLAG_Z } else { 0 });
         }
         opcode::OPCODE_TAY => {
             cpu.reg_y = cpu.reg_a;
@@ -205,7 +211,6 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
         }
         opcode::OPCODE_TXS => {
             cpu.reg_s = cpu.reg_x;
-            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_s & REG_P_FLAG_N) | (if cpu.reg_s == 0 { REG_P_FLAG_Z } else { 0 });
         }
         opcode::OPCODE_TYA => {
             cpu.reg_a = cpu.reg_y;
@@ -256,7 +261,7 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
         opcode::OPCODE_BIT => {
             let test = cpu_memory::read_mem(mem, data as u16) as u8;
             let zflag = (if (cpu.reg_a & test) == 0 { REG_P_FLAG_Z } else { 0 }) as u8;
-            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z)) | (test & REG_P_FLAG_N) | zflag;
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z)) | (test & REG_P_FLAG_N) | zflag | (test & REG_P_FLAG_V);
         }
         opcode::OPCODE_CMP => {
             if op.addressing != opcode::ADDRESSING_IMMEDIATE {
@@ -388,42 +393,42 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
         }
         opcode::OPCODE_BEQ => {
             if (cpu.reg_p & REG_P_FLAG_Z) != 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_BNE => {
             if (cpu.reg_p & REG_P_FLAG_Z) == 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_BMI => {
             if (cpu.reg_p & REG_P_FLAG_N) != 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_BPL => {
             if (cpu.reg_p & REG_P_FLAG_N) == 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_BVS => {
             if (cpu.reg_p & REG_P_FLAG_V) != 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_BVC => {
             if (cpu.reg_p & REG_P_FLAG_V) == 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_BCS => {
             if (cpu.reg_p & REG_P_FLAG_C) != 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_BCC => {
             if (cpu.reg_p & REG_P_FLAG_C) == 0 {
-                cpu.reg_pc = (cpu.reg_pc as i32 + relative as i32) as u16;
+                cpu.reg_pc = ((cpu.reg_pc as i32) + (relative as i32)) as u16;
             }
         }
         opcode::OPCODE_JMP => {
@@ -466,7 +471,7 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
             // nop
         }
         _ => {
-            panic!("not implemented");
+            // nop
         }
     }
 }

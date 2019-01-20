@@ -633,5 +633,5 @@ pub const OPCODE_DEBUG_SYMBOL: [&str; 256] = [
 ];
 
 pub fn debug_opcode(code: u8) {
-    println!("{}", OPCODE_DEBUG_SYMBOL[code as usize]);
+    println!("{} bytes: {}", OPCODE_DEBUG_SYMBOL[code as usize], OPCODE_TABLE[code as usize].bytes);
 }

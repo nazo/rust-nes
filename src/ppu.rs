@@ -34,7 +34,7 @@ pub fn new_ppu(rom_data: &Vec<u8>) -> Ppu {
     };
 }
 
-pub fn read_io(ppu: &Ppu, addr: u16) -> u8 {
+pub fn read_io(ppu: &mut Ppu, addr: u16) -> u8 {
     match addr {
         0x2000 => {
             // ppu controller
@@ -44,7 +44,11 @@ pub fn read_io(ppu: &Ppu, addr: u16) -> u8 {
         }
         0x2002 => {
             // ppu status
-            return ppu.reg_status;
+            let status = ppu.reg_status;
+            ppu.reg_status = ppu.reg_status & 0x7F;
+            ppu.scroll_write_counter = 0;
+            ppu.vram_write_counter = 0;
+            return status;
         }
         0x2003 => {
             // oam address

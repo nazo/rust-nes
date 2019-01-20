@@ -10,21 +10,26 @@ pub struct CpuMemory<'a> {
 
 pub fn new_memory<'a>(rom_data: &Vec<u8>, ppu: &'a mut ppu::Ppu) -> CpuMemory<'a> {
     return CpuMemory {
-        wram: vec![0; 0x07FF],
-        ext_ram: vec![0; 0x1FDF],
-        backup_ram: vec![0; 0x1FFF],
+        wram: vec![0; 0x0800],
+        ext_ram: vec![0; 0x1FE0],
+        backup_ram: vec![0; 0x2000],
         program_rom: rom_data.clone(),
         ppu: ppu,
     };
 }
 
-pub fn read_mem_word(mem: &CpuMemory, addr: u16) -> u16 {
+pub fn read_mem_word(mem: &mut CpuMemory, addr: u16) -> u16 {
     let data1 = read_mem(mem, addr) as u16;
     let data2 = read_mem(mem, addr + 1) as u16;
     return (data2 << 8) | data1;
 }
 
-pub fn read_mem(mem: &CpuMemory, addr: u16) -> u8 {
+pub fn write_mem_word(mem: &mut CpuMemory, addr: u16, data: u16) {
+    write_mem(mem, addr, (data & 0xFF) as u8);
+    write_mem(mem, addr + 1, ((data & 0xFF00) >> 8) as u8);
+}
+
+pub fn read_mem(mem: &mut CpuMemory, addr: u16) -> u8 {
     let mut value = 0u8;
     if addr <= 0x07FF {
         value = mem.wram[addr as usize];
@@ -32,7 +37,7 @@ pub fn read_mem(mem: &CpuMemory, addr: u16) -> u8 {
         // unused
     } else if addr <= 0x2007 || addr == 0x4014 {
         // ppu
-        value = ppu::read_io(&mem.ppu, addr);
+        value = ppu::read_io(&mut mem.ppu, addr);
     } else if addr <= 0x3FFF {
         // unused
     } else if addr <= 0x401F {
@@ -49,12 +54,12 @@ pub fn read_mem(mem: &CpuMemory, addr: u16) -> u8 {
             value = mem.program_rom[(addr - 0x8000) as usize];
         }
     }
-    // println!("read {:04X?} value:{:02X}", addr, value);
+    println!("read {:04X?} value:{:02X}", addr, value);
     return value;
 }
 
 pub fn write_mem(mem: &mut CpuMemory, addr: u16, value: u8) {
-    // println!("write {:04X} value:{:02X}", addr, value);
+    println!("write {:04X} value:{:02X}", addr, value);
     if addr <= 0x07FF {
         mem.wram[addr as usize] = value;
     } else if addr <= 0x1FFF {
