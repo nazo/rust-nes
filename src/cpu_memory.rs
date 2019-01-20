@@ -49,12 +49,12 @@ pub fn read_mem(mem: &CpuMemory, addr: u16) -> u8 {
             value = mem.program_rom[(addr - 0x8000) as usize];
         }
     }
-    println!("read {:04X?} value:{:02X}", addr, value);
+    // println!("read {:04X?} value:{:02X}", addr, value);
     return value;
 }
 
 pub fn write_mem(mem: &mut CpuMemory, addr: u16, value: u8) {
-    println!("write {:04X} value:{:02X}", addr, value);
+    // println!("write {:04X} value:{:02X}", addr, value);
     if addr <= 0x07FF {
         mem.wram[addr as usize] = value;
     } else if addr <= 0x1FFF {

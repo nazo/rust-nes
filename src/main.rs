@@ -20,8 +20,8 @@ fn main() {
         .build()
         .unwrap();
 
-    let nes_rom = rom::load_nes("sample1.nes");
-    // let nes_rom = rom::load_nes("nestest.nes");
+    // let nes_rom = rom::load_nes("sample1.nes");
+    let nes_rom = rom::load_nes("nestest.nes");
     let mut cpu = cpu::new_cpu();
     let mut ppu = ppu::new_ppu(&nes_rom.character_rom.data);
     let mut mem = cpu_memory::new_memory(&nes_rom.program_rom.data, &mut ppu);
@@ -45,7 +45,7 @@ fn main() {
             }
         }
 
-        println!("---");
+        // println!("---");
         cpu::run(&mut cpu, &mut mem);
 
         ppu::draw_to_canvas(&mut v_canvas, &mem.ppu);

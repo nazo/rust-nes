@@ -91,7 +91,7 @@ pub fn write_io(ppu: &mut Ppu, addr: u16, value: u8) {
         0x2004 => {
             // oam access
             ppu.oam[ppu.oam_address as usize] = value;
-            println!("oam address {:04X} = {:02X}", ppu.oam_address, value);
+            // println!("oam address {:04X} = {:02X}", ppu.oam_address, value);
         }
         0x2005 => {
             // scroll
@@ -114,7 +114,7 @@ pub fn write_io(ppu: &mut Ppu, addr: u16, value: u8) {
         0x2007 => {
             // vram access
             ppu.vram[ppu.vram_address as usize] = value;
-            println!("vram address {:04X} = {:02X}", ppu.vram_address, value);
+            // println!("vram address {:04X} = {:02X}", ppu.vram_address, value);
             ppu.vram_address += 1;
         }
         0x4014 => {
