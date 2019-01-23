@@ -11,6 +11,7 @@ pub struct Cpu {
     pub reg_s: u8,
     pub reg_p: u8,
     pub reg_pc: u16,
+    pub cycle: i16,
 }
 
 pub fn new_cpu() -> Cpu {
@@ -18,15 +19,16 @@ pub fn new_cpu() -> Cpu {
         reg_a: 0,
         reg_x: 0,
         reg_y: 0,
-        reg_s: 0,
-        reg_p: 0,
+        reg_s: 0xFD,
+        reg_p: REG_P_FLAG_I | REG_P_FLAG_R,
         reg_pc: 0x8000,
+        cycle: 0,
     };
 }
 
+const REG_P_MASK_R: u8 = 0xDF;
 const REG_P_MASK_N: u8 = 0x7F;
 const REG_P_MASK_V: u8 = 0xBF;
-const REG_P_MASK_R: u8 = 0xDF;
 const REG_P_MASK_B: u8 = 0xEF;
 const REG_P_MASK_D: u8 = 0xF7;
 const REG_P_MASK_I: u8 = 0xFB;
@@ -69,37 +71,61 @@ fn write_word(data: &mut Vec<u8>, p: u16, v: u16) {
 }
 
 fn stack_push_byte(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, data: u8) {
-    cpu_memory::write_mem(mem, 0x0100 | (cpu.reg_s as u16), data);
-    cpu.reg_s = cpu.reg_s.wrapping_add(1);
+    let stack_addr = 0x0100 | (cpu.reg_s as u16);
+    // println!("stack push byte p={:04X} v={:04X}", stack_addr, data);
+    cpu_memory::write_mem(mem, stack_addr, data);
+    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
 }
 
 fn stack_pop_byte(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) -> u8 {
-    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
-    return cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16));
+    cpu.reg_s = cpu.reg_s.wrapping_add(1);
+
+    let stack_addr = 0x0100 | (cpu.reg_s as u16);
+    let data = cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16));
+
+    // println!("stack pop byte p={:04X} v={:04X}", stack_addr, data);
+    return data;
 }
 
 fn stack_push_word(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, data: u16) {
-    cpu_memory::write_mem(mem, 0x0100 | (cpu.reg_s as u16), (data & 0xFF) as u8);
-    cpu.reg_s = cpu.reg_s.wrapping_add(1);
+    let stack_addr = 0x0100 | (cpu.reg_s as u16);
+    // println!("stack push word p={:04X} v={:04X}", stack_addr, data);
     cpu_memory::write_mem(mem, 0x0100 | (cpu.reg_s as u16), ((data & 0xFF00) >> 8) as u8);
-    cpu.reg_s = cpu.reg_s.wrapping_add(1);
+    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
+    cpu_memory::write_mem(mem, 0x0100 | (cpu.reg_s as u16), (data & 0xFF) as u8);
+    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
 }
 
 fn stack_pop_word(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) -> u16 {
     let mut data: u16;
-    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
-    data = (cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16)) as u16) << 8;
-    cpu.reg_s = cpu.reg_s.wrapping_sub(1);
-    data = data | (cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16)) as u16);
+    cpu.reg_s = cpu.reg_s.wrapping_add(1);
+    let stack_addr = 0x0100 | (cpu.reg_s as u16);
+    data = cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16)) as u16;
+    cpu.reg_s = cpu.reg_s.wrapping_add(1);
+    data = data | ((cpu_memory::read_mem(mem, 0x0100 | (cpu.reg_s as u16)) as u16) << 8);
+
+    // println!("stack pop word p={:04X} v={:04X}", stack_addr, data);
     return data;
 }
 
 pub fn run(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) {
-    println!("pc: {:04X}", cpu.reg_pc);
+    cpu.cycle = cpu.cycle - 1;
+    if cpu.cycle > 0 {
+        return;
+    }
+    cpu.reg_p = cpu.reg_p | REG_P_FLAG_R;
+
+    // println!("pc: {:04X}", cpu.reg_pc);
+
+    let pc = cpu.reg_pc;
     let code = fetch_pc_byte(cpu, mem);
     let op = &opcode::OPCODE_TABLE[code as usize];
-    opcode::debug_opcode(code);
+
+    println!("{:04X}  {}                       A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}", pc, opcode::OPCODE_DEBUG_SYMBOL[code as usize], cpu.reg_a, cpu.reg_x, cpu.reg_y, cpu.reg_p, cpu.reg_s);
+
+    // opcode::debug_opcode(code);
     exec_instructions(cpu, mem, op);
+    cpu.cycle = op.cycles as i16;
 }
 
 fn read_by_addressing(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode::Opcode) -> u16 {
@@ -113,33 +139,35 @@ fn read_by_addressing(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcod
             return fetch_pc_byte(cpu, mem) as u16;
         }
         opcode::ADDRESSING_ZEROPAGE_X => {
-            let data = fetch_pc_byte(cpu, mem) as u16;
-            return data + (cpu.reg_x as u16);
+            let data = fetch_pc_byte(cpu, mem);
+            return data.wrapping_add(cpu.reg_x) as u16;
         }
         opcode::ADDRESSING_ZEROPAGE_Y => {
-            let data = fetch_pc_byte(cpu, mem) as u16;
-            return data + (cpu.reg_y as u16);
+            let data = fetch_pc_byte(cpu, mem);
+            return data.wrapping_add(cpu.reg_y) as u16;
         }
         opcode::ADDRESSING_ABSOLUTE => {
             return fetch_pc_word(cpu, mem);
         }
         opcode::ADDRESSING_ABSOLUTE_X => {
             let data = fetch_pc_word(cpu, mem);
-            return data + (cpu.reg_x as u16);
+            return data.wrapping_add(cpu.reg_x as u16);
         }
         opcode::ADDRESSING_ABSOLUTE_Y => {
             let data = fetch_pc_word(cpu, mem);
-            return data + (cpu.reg_y as u16);
+            return data.wrapping_add(cpu.reg_y as u16);
         }
         opcode::ADDRESSING_INDIRECT_X => {
-            let fetch = fetch_pc_byte(cpu, mem) as u16;
-            let data = cpu_memory::read_mem(mem, fetch + (cpu.reg_x as u16)) as u16;
-            return data;
+            let fetch = fetch_pc_byte(cpu, mem);
+            let mut addr = cpu_memory::read_mem(mem, fetch.wrapping_add(cpu.reg_x) as u16) as u16;
+            addr = addr | ((cpu_memory::read_mem(mem, fetch.wrapping_add(cpu.reg_x).wrapping_add(1) as u16) as u16) << 8);
+            return addr;
         }
         opcode::ADDRESSING_INDIRECT_Y => {
-            let fetch = fetch_pc_byte(cpu, mem) as u16;
-            let data = cpu_memory::read_mem(mem, fetch + (cpu.reg_y as u16)) as u16;
-            return data;
+            let fetch = fetch_pc_byte(cpu, mem);
+            let mut addr = (cpu_memory::read_mem(mem, fetch.wrapping_add(1) as u16) as u16) << 8;
+            addr = addr | cpu_memory::read_mem(mem, fetch as u16) as u16;
+            return addr.wrapping_add(cpu.reg_y as u16);
         }
         opcode::ADDRESSING_INDIRECT => {
             let fetch = fetch_pc_word(cpu, mem);
@@ -161,7 +189,7 @@ fn read_by_addressing(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcod
 fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode::Opcode) {
     let mut data = read_by_addressing(cpu, mem, op);
     let relative = (data as u8) as i8;
-    println!("data: {:04X}", data);
+    // println!("data: {:04X}", data);
     match op.code {
         opcode::OPCODE_LDA => {
             if op.addressing != opcode::ADDRESSING_IMMEDIATE {
@@ -211,6 +239,7 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
         }
         opcode::OPCODE_TXS => {
             cpu.reg_s = cpu.reg_x;
+            // println!("TXS reg_s = {:04X}", cpu.reg_x)
         }
         opcode::OPCODE_TYA => {
             cpu.reg_a = cpu.reg_y;
@@ -389,7 +418,6 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
         }
         opcode::OPCODE_PLP => {
             cpu.reg_p = stack_pop_byte(cpu, mem) as u8;
-            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_p & REG_P_FLAG_N) | (if cpu.reg_p == 0 { REG_P_FLAG_Z } else { 0 });
         }
         opcode::OPCODE_BEQ => {
             if (cpu.reg_p & REG_P_FLAG_Z) != 0 {
@@ -436,7 +464,7 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
         }
         opcode::OPCODE_JSR => {
             let reg_pc = cpu.reg_pc;
-            stack_push_word(cpu, mem, reg_pc);
+            stack_push_word(cpu, mem, reg_pc - 1);
             cpu.reg_pc = data;
         }
         opcode::OPCODE_RTS => {
@@ -465,7 +493,14 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
             cpu.reg_p = cpu.reg_p & REG_P_MASK_C;
         }
         opcode::OPCODE_BRK => {
+            stack_push_word(cpu, mem, cpu.reg_pc);
+            stack_push_byte(cpu, mem, cpu.reg_p);
+            cpu.reg_pc = cpu_memory::read_mem_word(mem, 0xFFFE);
             cpu.reg_p = cpu.reg_p | REG_P_FLAG_B;
+        }
+        opcode::OPCODE_RTI => {
+            cpu.reg_p = stack_pop_byte(cpu, mem);
+            cpu.reg_pc = stack_pop_word(cpu, mem);
         }
         opcode::OPCODE_NOP => {
             // nop

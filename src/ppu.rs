@@ -12,6 +12,7 @@ pub struct Ppu {
     reg_controller: u8,
     reg_mask: u8,
     reg_status: u8,
+    cycle: u32,
 }
 
 pub fn new_ppu(rom_data: &Vec<u8>) -> Ppu {
@@ -20,6 +21,7 @@ pub fn new_ppu(rom_data: &Vec<u8>) -> Ppu {
         vram[i] = rom_data[i];
     }
     return Ppu {
+        cycle: 0,
         vram: vram,
         oam: vec![0; 256],
         vram_write_counter: 0,
@@ -48,6 +50,7 @@ pub fn read_io(ppu: &mut Ppu, addr: u16) -> u8 {
             ppu.reg_status = ppu.reg_status & 0x7F;
             ppu.scroll_write_counter = 0;
             ppu.vram_write_counter = 0;
+            ppu.reg_status = ppu.reg_status | 0x80;
             return status;
         }
         0x2003 => {
@@ -186,7 +189,21 @@ fn put_bg_tile(canvas: &mut Vec<u8>, ppu: &Ppu, base_x: i32, base_y: i32, chrnum
     put_tile(canvas, ppu, base_x, base_y, base_addr, chrnum, 0x00);
 }
 
-pub fn draw_to_canvas(canvas: &mut Vec<u8>, ppu: &Ppu) {
+pub fn run(ppu: &mut Ppu) {
+    if ppu.cycle >= 256 * 240 {
+        ppu.reg_status = ppu.reg_status | 0x80;
+    } else {
+        ppu.reg_status = ppu.reg_status & 0x7F;
+    }
+    ppu.cycle += 1;
+}
+
+pub fn is_draw_timing(ppu: &Ppu) -> bool {
+    return ppu.cycle >= 256 * 260;
+}
+
+pub fn draw_to_canvas(canvas: &mut Vec<u8>, ppu: &mut Ppu) {
+    ppu.cycle = 0;
     // println!("ppu controller:{:02X} mask:{:02X} status:{:02X}", ppu.reg_controller, ppu.reg_mask, ppu.reg_status);
     for y in 0..(240/8) {
         for x in 0..(256/8) {

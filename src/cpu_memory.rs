@@ -31,19 +31,24 @@ pub fn write_mem_word(mem: &mut CpuMemory, addr: u16, data: u16) {
 
 pub fn read_mem(mem: &mut CpuMemory, addr: u16) -> u8 {
     let mut value = 0u8;
-    if addr <= 0x07FF {
+    if addr < 0x0800 {
         value = mem.wram[addr as usize];
-    } else if addr <= 0x1FFF {
+    } else if addr < 0x2000 {
         // unused
-    } else if addr <= 0x2007 || addr == 0x4014 {
+    } else if addr < 0x2008 || addr == 0x4014 {
         // ppu
         value = ppu::read_io(&mut mem.ppu, addr);
-    } else if addr <= 0x3FFF {
+    } else if addr < 0x4000 {
         // unused
-    } else if addr <= 0x401F {
-    } else if addr <= 0x5FFF {
-    } else if addr <= 0x7FFF {
-    } else if addr <= 0xBFFF {
+    } else if addr < 0x4020 {
+        // io
+    } else if addr < 0x6000 {
+        // ext ram
+        value = mem.ext_ram[(addr - 0x4020) as usize];
+    } else if addr < 0x8000 {
+        // backup rom
+        value = mem.backup_ram[(addr - 0x6000) as usize];
+    } else if addr <= 0xC000 {
         // program rom
         value = mem.program_rom[(addr - 0x8000) as usize];
     } else {
@@ -54,24 +59,27 @@ pub fn read_mem(mem: &mut CpuMemory, addr: u16) -> u8 {
             value = mem.program_rom[(addr - 0x8000) as usize];
         }
     }
-    println!("read {:04X?} value:{:02X}", addr, value);
+    // println!("read {:04X?} value:{:02X}", addr, value);
     return value;
 }
 
 pub fn write_mem(mem: &mut CpuMemory, addr: u16, value: u8) {
-    println!("write {:04X} value:{:02X}", addr, value);
-    if addr <= 0x07FF {
+    // println!("write {:04X} value:{:02X}", addr, value);
+    if addr < 0x0800 {
         mem.wram[addr as usize] = value;
-    } else if addr <= 0x1FFF {
+    } else if addr < 0x2000 {
         // unused
-    } else if addr <= 0x2007 || addr == 0x4014 {
+    } else if addr < 0x2008 || addr == 0x4014 {
         // ppu
         ppu::write_io(&mut mem.ppu, addr, value);
-    } else if addr <= 0x3FFF {
+    } else if addr < 0x4000 {
         // unused
-    } else if addr <= 0x401F {
-    } else if addr <= 0x5FFF {
-    } else if addr <= 0x7FFF {
+    } else if addr < 0x4020 {
+    } else if addr < 0x6000 {
+        mem.ext_ram[(addr - 0x4020) as usize] = value;
+    } else if addr < 0x8000 {
+        mem.backup_ram[(addr - 0x6000) as usize] = value;
+    } else if addr < 0x8000 {
     } else {
         // program rom
         // read only
