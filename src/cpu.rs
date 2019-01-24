@@ -26,9 +26,9 @@ pub fn new_cpu() -> Cpu {
     };
 }
 
-const REG_P_MASK_R: u8 = 0xDF;
 const REG_P_MASK_N: u8 = 0x7F;
 const REG_P_MASK_V: u8 = 0xBF;
+const REG_P_MASK_R: u8 = 0xDF;
 const REG_P_MASK_B: u8 = 0xEF;
 const REG_P_MASK_D: u8 = 0xF7;
 const REG_P_MASK_I: u8 = 0xFB;
@@ -121,7 +121,8 @@ pub fn run(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory) {
     let code = fetch_pc_byte(cpu, mem);
     let op = &opcode::OPCODE_TABLE[code as usize];
 
-    println!("{:04X}  {}                       A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}", pc, opcode::OPCODE_DEBUG_SYMBOL[code as usize], cpu.reg_a, cpu.reg_x, cpu.reg_y, cpu.reg_p, cpu.reg_s);
+    // println!("{:04X}  {}                       A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}", pc, opcode::OPCODE_DEBUG_SYMBOL[code as usize], cpu.reg_a, cpu.reg_x, cpu.reg_y, cpu.reg_p, cpu.reg_s);
+    println!("{:04X} {:02X} A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}", pc, code, cpu.reg_a, cpu.reg_x, cpu.reg_y, cpu.reg_p, cpu.reg_s);
 
     // opcode::debug_opcode(code);
     exec_instructions(cpu, mem, op);
@@ -170,8 +171,10 @@ fn read_by_addressing(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcod
             return addr.wrapping_add(cpu.reg_y as u16);
         }
         opcode::ADDRESSING_INDIRECT => {
-            let fetch = fetch_pc_word(cpu, mem);
-            let data = cpu_memory::read_mem_word(mem, fetch);
+            let mut fetch = fetch_pc_word(cpu, mem);
+            let mut data = cpu_memory::read_mem(mem, fetch) as u16;
+            fetch = (fetch & 0xFF00) | (((fetch & 0xFF) as u8).wrapping_add(1) as u16);
+            data = data | ((cpu_memory::read_mem(mem, fetch) as u16) << 8);
             return data;
         }
         opcode::ADDRESSING_ACCUMULATOR => {
@@ -212,6 +215,14 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
             cpu.reg_y = data as u8;
             cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_y & REG_P_FLAG_N) | (if cpu.reg_y == 0 { REG_P_FLAG_Z } else { 0 });
         }
+        opcode::OPCODE_LAX => {
+            if op.addressing != opcode::ADDRESSING_IMMEDIATE {
+                data = cpu_memory::read_mem(mem, data as u16) as u16;
+            }
+            cpu.reg_x = data as u8;
+            cpu.reg_a = cpu.reg_x;
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_a & REG_P_FLAG_N) | (if cpu.reg_a == 0 { REG_P_FLAG_Z } else { 0 });
+        }
         opcode::OPCODE_STA => {
             cpu_memory::write_mem(mem, data, cpu.reg_a);
         }
@@ -251,16 +262,16 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
             }
             let result = (cpu.reg_a as u16).wrapping_add(data).wrapping_add((cpu.reg_p & REG_P_FLAG_C) as u16);
             let reg_a = (result & 0xFF) as u8;
-            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z & REG_P_MASK_C)) | (reg_a & REG_P_FLAG_N) | (if reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | (if result > 0xFF { REG_P_FLAG_C } else { 0 }) | ((!(cpu.reg_a ^ (data as u8)) & (cpu.reg_a ^ reg_a)) & REG_P_FLAG_N);
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z & REG_P_MASK_C)) | (reg_a & REG_P_FLAG_N) | (if reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | (if result > 0xFF { REG_P_FLAG_C } else { 0 }) | (((!(cpu.reg_a ^ (data as u8)) & (cpu.reg_a ^ reg_a)) & REG_P_FLAG_N) >> 1);
             cpu.reg_a = reg_a;
         }
         opcode::OPCODE_SBC => {
             if op.addressing != opcode::ADDRESSING_IMMEDIATE {
                 data = cpu_memory::read_mem(mem, data as u16) as u16;
             }
-            let result = (cpu.reg_a as i16).wrapping_sub(data as i16).wrapping_sub((cpu.reg_p & REG_P_FLAG_C) as i16);
+            let result = (cpu.reg_a as i16).wrapping_sub(data as i16).wrapping_sub(1 - (cpu.reg_p & REG_P_FLAG_C) as i16);
             let reg_a = (result & 0xFF) as u8;
-            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z & REG_P_MASK_C)) | (reg_a & REG_P_FLAG_N) | (if reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | (if result < 0 { REG_P_FLAG_C } else { 0 }) | ((!(cpu.reg_a ^ (data as u8)) & (cpu.reg_a ^ reg_a)) & REG_P_FLAG_N);
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z & REG_P_MASK_C)) | (reg_a & REG_P_FLAG_N) | (if reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | (if result < 0 { 0 } else { REG_P_FLAG_C }) | ((((cpu.reg_a ^ (data as u8)) & (cpu.reg_a ^ reg_a)) & REG_P_FLAG_N) >> 1);
             cpu.reg_a = reg_a;
         }
         opcode::OPCODE_AND => {
@@ -348,6 +359,15 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
             cpu.reg_y = cpu.reg_y.wrapping_add(1);
             cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_y & REG_P_FLAG_N) | (if cpu.reg_y == 0 { REG_P_FLAG_Z } else { 0 });
         }
+        opcode::OPCODE_ISC => {
+            let mut value = cpu_memory::read_mem(mem, data as u16) as u8;
+            value = value.wrapping_add(1);
+            cpu_memory::write_mem(mem, data, value);
+            let result = (cpu.reg_a as i16).wrapping_sub(value as i16).wrapping_sub(1 - (cpu.reg_p & REG_P_FLAG_C) as i16);
+            let reg_a = ((result & 0xFF) as u8);
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z & REG_P_MASK_C)) | (reg_a & REG_P_FLAG_N) | (if reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | (if result < 0 { 0 } else { REG_P_FLAG_C }) | ((((cpu.reg_a ^ (data as u8)) & (cpu.reg_a ^ reg_a)) & REG_P_FLAG_N) >> 1);
+            cpu.reg_a = reg_a;
+        }
         opcode::OPCODE_LSR => {
             let mut shift: u8;
             let remain: u8;
@@ -410,14 +430,14 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
             stack_push_byte(cpu, mem, cpu.reg_a);
         }
         opcode::OPCODE_PHP => {
-            stack_push_byte(cpu, mem, cpu.reg_p);
+            stack_push_byte(cpu, mem, cpu.reg_p | REG_P_FLAG_B);
         }
         opcode::OPCODE_PLA => {
-            cpu.reg_a = stack_pop_byte(cpu, mem) as u8;
+            cpu.reg_a = stack_pop_byte(cpu, mem);
             cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z)) | (cpu.reg_a & REG_P_FLAG_N) | (if cpu.reg_a == 0 { REG_P_FLAG_Z } else { 0 });
         }
         opcode::OPCODE_PLP => {
-            cpu.reg_p = stack_pop_byte(cpu, mem) as u8;
+            cpu.reg_p = (stack_pop_byte(cpu, mem) & REG_P_MASK_B) | (cpu.reg_p & REG_P_FLAG_B);
         }
         opcode::OPCODE_BEQ => {
             if (cpu.reg_p & REG_P_FLAG_Z) != 0 {
@@ -502,11 +522,69 @@ fn exec_instructions(cpu: &mut Cpu, mem: &mut cpu_memory::CpuMemory, op: &opcode
             cpu.reg_p = stack_pop_byte(cpu, mem);
             cpu.reg_pc = stack_pop_word(cpu, mem);
         }
+        opcode::OPCODE_SAX => {
+            cpu_memory::write_mem(mem, data, cpu.reg_a & cpu.reg_x);
+        }
+        opcode::OPCODE_DCP => {
+            let mut value = cpu_memory::read_mem(mem, data as u16) as u8;
+            value = value.wrapping_sub(1);
+            cpu_memory::write_mem(mem, data, value);
+            let result = cpu.reg_a.wrapping_sub(value as u8);
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z & REG_P_MASK_C)) | (result & REG_P_FLAG_N) | (if result == 0 { REG_P_FLAG_Z } else { 0 }) | (if cpu.reg_a < (value as u8) { 0 } else { REG_P_FLAG_C });
+        }
+        opcode::OPCODE_SLO => {
+            let addr = data as u16;
+            data = cpu_memory::read_mem(mem, addr) as u16;
+            let original = data as u8;
+            let remain = (original & REG_P_FLAG_N) >> 7;
+            let shift = original << 1;
+            cpu_memory::write_mem(mem, addr, shift);
+            cpu.reg_a = cpu.reg_a | shift;
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z & REG_P_MASK_C)) | (cpu.reg_a & REG_P_FLAG_N) | (if cpu.reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | remain;
+        }
+        opcode::OPCODE_RLA => {
+            let addr = data as u16;
+            data = cpu_memory::read_mem(mem, addr) as u16;
+            let original = data as u8;
+            let remain = (original & 0x80) >> 7;
+            let shift = original << 1 | (cpu.reg_p & REG_P_FLAG_C);
+            cpu_memory::write_mem(mem, addr, shift);
+            cpu.reg_a = cpu.reg_a & (shift as u8);
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z & REG_P_MASK_C)) | (cpu.reg_a & REG_P_FLAG_N) | (if cpu.reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | remain;
+        }
+        opcode::OPCODE_SRE => {
+            let addr = data as u16;
+            data = cpu_memory::read_mem(mem, addr) as u16;
+            let original = data as u8;
+            let remain = original & 1;
+            let shift = original >> 1;
+            cpu_memory::write_mem(mem, addr, shift);
+            cpu.reg_a = cpu.reg_a ^ (shift as u8);
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_Z & REG_P_MASK_C)) | (cpu.reg_a & REG_P_FLAG_N) | (if cpu.reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | remain;
+        }
+        opcode::OPCODE_RRA => {
+            let addr = data as u16;
+            data = cpu_memory::read_mem(mem, addr) as u16;
+            let original = data as u8;
+            let remain = original & 1;
+            let shift = original >> 1 | ((cpu.reg_p & REG_P_FLAG_C) << 7);
+            cpu_memory::write_mem(mem, addr, shift);
+            let result = (cpu.reg_a as u16).wrapping_add(shift as u16).wrapping_add(remain as u16);
+            let reg_a = (result & 0xFF) as u8;
+            cpu.reg_p = (cpu.reg_p & (REG_P_MASK_N & REG_P_MASK_V & REG_P_MASK_Z & REG_P_MASK_C)) | (reg_a & REG_P_FLAG_N) | (if reg_a == 0 { REG_P_FLAG_Z } else { 0 }) | (if result > 0xFF { REG_P_FLAG_C } else { 0 }) | (((!(cpu.reg_a ^ (shift as u8)) & (cpu.reg_a ^ reg_a)) & REG_P_FLAG_N) >> 1);
+            cpu.reg_a = reg_a;
+        }
         opcode::OPCODE_NOP => {
             // nop
         }
-        _ => {
+        opcode::OPCODE_KIL => {
             // nop
+        }
+        opcode::OPCODE_LAS => {
+            // nop?
+        }
+        _ => {
+            panic!("not implemented");
         }
     }
 }

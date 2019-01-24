@@ -199,7 +199,7 @@ pub fn run(ppu: &mut Ppu) {
 }
 
 pub fn is_draw_timing(ppu: &Ppu) -> bool {
-    return ppu.cycle >= 256 * 260;
+    return ppu.cycle >= 341 * 262;
 }
 
 pub fn draw_to_canvas(canvas: &mut Vec<u8>, ppu: &mut Ppu) {
